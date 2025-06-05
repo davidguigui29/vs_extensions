@@ -116,9 +116,21 @@ ls /usr/include/curl/curl.h
 ### 🧰 Build / Run Examples
 
 #### 🐍 Python
+The python  script supports an optional -e argument that allows the user to specify the IDE (code, codium, or vscodium).
+
+* #####  * Download only
+```bash
+python installer.py ms-python.python
+```
+
+* ##### Download and install
+```bash
+python3 scripts/installer.py -i ms-python.python
+```
+* ##### Download, install, and specify the IDE(code, codium, or vscodium)
 
 ```bash
-python3 scripts/installer.py [-i] ms-python.python
+python installer.py -i -e codium ms-python.python
 ```
 
 #### ⚙️ C
