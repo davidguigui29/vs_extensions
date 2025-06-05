@@ -1,12 +1,17 @@
 import re
 import sys
+import json
 import shutil
 import requests
 import subprocess
+from bs4 import BeautifulSoup
 
 
 class VSCodeExtensionInstaller:
-    MARKETPLACE_URL = "https://marketplace.visualstudio.com/items?itemName={}&ssr=false#overview"
+    MARKETPLACE_URL_1 = "https://marketplace.visualstudio.com/items?itemName={}&ssr=false#overview"
+    MARKETPLACE_URL_2 = "https://marketplace.visualstudio.com/items?itemName={}&ssr=false#review-details"
+    MARKETPLACE_URL_3 = "https://marketplace.visualstudio.com/items?itemName={}&ssr=false#qna"
+    MARKETPLACE_URL_4 = "https://marketplace.visualstudio.com/items?itemName={}&ssr=false#version-history"
 
     def __init__(self, extension_id, install=False):
         if "." not in extension_id:
@@ -24,6 +29,8 @@ class VSCodeExtensionInstaller:
                 return cmd
         raise EnvironmentError("No VS Code CLI tool found (tried 'code', 'codium', 'vscodium').")
 
+
+
     def extract_asset_uri(self, html: str):
         asset_match = re.search(r'"assetUri"\s*:\s*"([^"]+)"', html)
         fallback_match = re.search(r'"fallbackAssetUri"\s*:\s*"([^"]+)"', html)
@@ -37,16 +44,50 @@ class VSCodeExtensionInstaller:
             self.vsix_url = f"{fallback_uri}/Microsoft.VisualStudio.Services.VSIXPackage"
             print(f"Found VSIX URL via fallbackAssetUri: {self.vsix_url}")
         else:
-            raise Exception("Could not find assetUri or fallbackAssetUri in page.")
+            # Third fallback: Search embedded JSON for assetType=VSIXPackage
+            print("Trying third fallback (BeautifulSoup JSON scan)...")
+            soup = BeautifulSoup(html, "html.parser")
+            scripts = soup.find_all("script", type="application/json")
+            for script in scripts:
+                try:
+                    data = json.loads(script.string)
+                    json_text = json.dumps(data)
+                    match = re.search(r'"assetType"\s*:\s*"Microsoft\.VisualStudio\.Services\.VSIXPackage"\s*,\s*"source"\s*:\s*"([^"]+)"', json_text)
+                    if match:
+                        self.vsix_url = match.group(1)
+                        print(f"Found VSIX URL via embedded JSON: {self.vsix_url}")
+                        return
+                except Exception:
+                    continue
+            raise Exception("Could not find assetUri, fallbackAssetUri, or embedded VSIXPackage source in page.")
+
 
     def fetch_download_url(self):
         print(f"Fetching Marketplace page for {self.publisher}.{self.extension}...")
-        url = self.MARKETPLACE_URL.format(f"{self.publisher}.{self.extension}")
-        response = requests.get(url)
-        if response.status_code != 200:
-            raise Exception(f"Failed to fetch Marketplace page (status: {response.status_code})")
 
-        self.extract_asset_uri(response.text)
+        urls = [
+            self.MARKETPLACE_URL_1.format(f"{self.publisher}.{self.extension}"),
+            self.MARKETPLACE_URL_2.format(f"{self.publisher}.{self.extension}"),
+            self.MARKETPLACE_URL_3.format(f"{self.publisher}.{self.extension}"),
+            self.MARKETPLACE_URL_4.format(f"{self.publisher}.{self.extension}")
+        ]
+
+        for url in urls:
+            print(f"Trying URL: {url}")
+            response = requests.get(url)
+            if response.status_code != 200:
+                print(f"Failed to fetch: {url} (status: {response.status_code})")
+                continue
+            try:
+                self.extract_asset_uri(response.text)
+                return  # Success
+            except Exception as e:
+                print(f"Extraction failed on this URL: {e}")
+                continue
+
+        raise Exception("Failed to find VSIX download URL from all known Marketplace pages.")
+
+
 
     def download_vsix(self):
         print(f"Downloading VSIX to {self.filename}...")
